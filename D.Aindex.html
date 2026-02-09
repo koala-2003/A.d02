@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ar" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Couples Routine Challenge</title>
+    <!-- تضمين المكتبات اللازمة عبر CDN -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- استيراد Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap');
+        body { font-family: 'Poppins', sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+    </style>
+</head>
+<body class="bg-white">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // --- إعدادات Firebase ---
+        // ملاحظة: يجب استبدال هذه القيم من مشروعك في Firebase Console ليعمل التزامن
+        const firebaseConfig = {
+            apiKey: "YOUR_API_KEY",
+            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_PROJECT_ID.appspot.com",
+            messagingSenderId: "YOUR_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+
+        // تهيئة Firebase مع فحص للأخطاء
+        let db = null;
+        let auth = null;
+        const isFirebaseConfigured = firebaseConfig.apiKey !== "YOUR_API_KEY";
+
+        if (isFirebaseConfigured) {
+            try {
+                if (!firebase.apps.length) {
+                    firebase.initializeApp(firebaseConfig);
+                }
+                auth = firebase.auth();
+                db = firebase.firestore();
+            } catch (e) {
+                console.error("Firebase Init Error:", e);
+            }
+        }
+
+        const appId = "routine-challenge-v1";
+
+        // المكونات الرسومية
+        const HeartIcon = ({ filled }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill={filled ? "#ef4444" : "none"} stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+        );
+        const TrophyIcon = ({ active }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={active ? "text-yellow-500 animate-pulse" : "text-slate-300"}><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
+        );
+
+        // الثوابت والمهام
+        const COMMON_TASKS = ["الاستيقاظ في السادسة صباحا", "ترتيب الفراش", "صلاه الفجر في موعدها", "لعب رياضة", "نشر الغسيل وإزاله الغسيل وترتيبه"];
+        const AHMAD_SPECIFIC = ["ترتيب المطبخ", "تكنيس غرفة النوم وترتيبها", "تكنيس غرفه المكتب وترتيبها"];
+        const DOAA_SPECIFIC = ["الصالون", "الحمام في الطابق الثاني", "الجيم", "وضع وجبة غسيل"];
+
+        function App() {
+            const [routineData, setRoutineData] = React.useState({
+                p1: { name: "Ahmad", tasks: [], points: 0 },
+                p2: { name: "Doaa", tasks: [], points: 0 },
+                wins: { p1: 0, p2: 0 },
+                stakes: { reward: "", punishment: "" }
+            });
+            const [loading, setLoading] = React.useState(true);
+            const [activeReaction, setActiveReaction] = React.useState(null);
+            const prevP1Points = React.useRef(null);
+            const prevP2Points = React.useRef(null);
+
+            const GIF_CONFIG = {
+                male_won_p1: "https://mrcufoxqeixftcnuqrhl.supabase.co/storage/v1/object/sign/daily%20routine/male01.gif?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9lNjY4ZTZjOS1lNWM0LTRkMjEtYTNmMi01ZGY0OWIzNGFiNDYiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJkYWlseSByb3V0aW5lL21hbGUwMS5naWYiLCJpYXQiOjE3NzA2MzA5NDksImV4cCI6MTgwMjE2Njk0OX0.hrhYbWpOASlzthXfMoSgMeZxKEaUrRRVqFlDJk5bfP0",
+                male_won_p2: "https://mrcufoxqeixftcnuqrhl.supabase.co/storage/v1/object/sign/daily%20routine/male02.gif?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9lNjY4ZTZjOS1lNWM0LTRkMjEtYTNmMi01ZGY0OWIzNGFiNDYiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJkYWlseSByb3V0aW5lL21hbGUwMi5naWYiLCJpYXQiOjE3NzA2MzA5NzQsImV4cCI6MTgwMjE2Njk3NH0.cyoykNJO81GETKEJeR8FsC6KIGO6nOi07BrsCiliVbQ",
+                female_won_p1: "https://mrcufoxqeixftcnuqrhl.supabase.co/storage/v1/object/sign/daily%20routine/female002.gif?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9lNjY4ZTZjOS1lNWM0LTRkMjEtYTNmMi01ZGY0OWIzNGFiNDYiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJkYWlseSByb3V0aW5lL2ZlbWFsZTAwMi5naWYiLCJpYXQiOjE3NzA2MzE5MzQsImV4cCI6MTgwMjE2NzkzNH0.eEz7zysxfdOq85oeOUErWwmf23j6fOjsjtb-HXOd1Zo",
+                female_won_p2: "https://mrcufoxqeixftcnuqrhl.supabase.co/storage/v1/object/sign/daily%20routine/female001.gif?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9lNjY4ZTZjOS1lNWM0LTRkMjEtYTNmMi01ZGY0OWIzNGFiNDYiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJkYWlseSByb3V0aW5lL2ZlbWFsZTAwMS5naWYiLCJpYXQiOjE3NzA2MzE4ODYsImV4cCI6MTgwMjE2Nzg4Nn0.5xnRVxCQDcPEkwnqh64IqucV1fNyLkpWpeBiDS4gQZQ"
+            };
+
+            const calculateProgress = (tasks) => {
+                if (!tasks || tasks.length === 0) return 0;
+                const completedCount = tasks.filter(t => t.completed).length;
+                return Math.round((completedCount / tasks.length) * 100);
+            };
+
+            const initializeData = () => {
+                const ahmadFixed = [...COMMON_TASKS, ...AHMAD_SPECIFIC].map(t => ({ id: Math.random().toString(36).substr(2, 9), text: t, completed: false, isFixed: true }));
+                const doaaFixed = [...COMMON_TASKS, ...DOAA_SPECIFIC].map(t => ({ id: Math.random().toString(36).substr(2, 9), text: t, completed: false, isFixed: true }));
+                return { p1: { name: "Ahmad", tasks: ahmadFixed, points: 0 }, p2: { name: "Doaa", tasks: doaaFixed, points: 0 }, wins: { p1: 0, p2: 0 }, stakes: { reward: "", punishment: "" } };
+            };
+
+            React.useEffect(() => {
+                if (!isFirebaseConfigured) {
+                    setRoutineData(initializeData());
+                    setLoading(false);
+                    return;
+                }
+
+                auth.signInAnonymously().then(() => {
+                    const docRef = db.collection('routines').doc(appId);
+                    const unsubscribe = docRef.onSnapshot((snapshot) => {
+                        if (snapshot.exists) {
+                            const data = snapshot.data();
+                            if (prevP1Points.current !== null && data.p1.points > prevP1Points.current) {
+                                setActiveReaction('p1'); setTimeout(() => setActiveReaction(null), 6000);
+                            } else if (prevP2Points.current !== null && data.p2.points > prevP2Points.current) {
+                                setActiveReaction('p2'); setTimeout(() => setActiveReaction(null), 6000);
+                            }
+                            prevP1Points.current = data.p1.points;
+                            prevP2Points.current = data.p2.points;
+                            setRoutineData(data);
+                        } else {
+                            const initial = initializeData();
+                            docRef.set(initial);
+                        }
+                        setLoading(false);
+                    });
+                    return () => unsubscribe();
+                }).catch(err => {
+                    console.error("Auth Error:", err);
+                    setRoutineData(initializeData());
+                    setLoading(false);
+                });
+            }, []);
+
+            const updateCloud = (newData) => {
+                if (isFirebaseConfigured) {
+                    db.collection('routines').doc(appId).set(newData);
+                } else {
+                    setRoutineData(newData);
+                }
+            };
+
+            const handleToggle = (partnerKey, taskId) => {
+                const updatedData = JSON.parse(JSON.stringify(routineData));
+                const task = updatedData[partnerKey].tasks.find(t => t.id === taskId);
+                if (task) {
+                    task.completed = !task.completed;
+                    updatedData[partnerKey].points = calculateProgress(updatedData[partnerKey].tasks);
+                    updateCloud(updatedData);
+                }
+            };
+
+            const handleAdd = (partnerKey, isFixed, taskText) => {
+                if (!taskText.trim()) return;
+                const updatedData = { ...routineData };
+                updatedData[partnerKey].tasks.push({ id: Date.now().toString(), text: taskText, completed: false, isFixed });
+                updatedData[partnerKey].points = calculateProgress(updatedData[partnerKey].tasks);
+                updateCloud(updatedData);
+            };
+
+            const endDay = () => {
+                const updatedData = JSON.parse(JSON.stringify(routineData));
+                if (updatedData.p1.points > updatedData.p2.points) updatedData.wins.p1++;
+                else if (updatedData.p2.points > updatedData.p1.points) updatedData.wins.p2++;
+                const reset = (p) => {
+                    updatedData[p].tasks = updatedData[p].tasks.filter(t => t.isFixed).map(t => ({ ...t, completed: false }));
+                    updatedData[p].points = calculateProgress(updatedData[p].tasks);
+                };
+                reset('p1'); reset('p2');
+                updatedData.stakes = { reward: "", punishment: "" };
+                updateCloud(updatedData);
+            };
+
+            if (loading) return (
+                <div className="h-screen flex flex-col items-center justify-center bg-white gap-4">
+                    <div className="animate-bounce"><HeartIcon filled /></div>
+                    <p className="text-slate-400 font-bold">تحميل التحدي...</p>
+                </div>
+            );
+
+            const dailyWinner = routineData.p1.points > routineData.p2.points ? 'p1' : 
+                                routineData.p2.points > routineData.p1.points ? 'p2' : null;
+
+            return (
+                <div className="min-h-screen bg-white p-4 md:p-8 text-slate-800">
+                    {!isFirebaseConfigured && (
+                        <div className="max-w-xl mx-auto mb-6 bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-2xl text-center text-sm font-semibold">
+                            ⚠️ تنبيه: لم يتم إدخال مفاتيح Firebase. التغييرات ستكون محلية ولن تظهر للطرف الآخر.
+                        </div>
+                    )}
+                    <div className="max-w-6xl mx-auto">
+                        <header className="text-center mb-12">
+                            <h1 className="text-4xl md:text-6xl font-extrabold text-slate-900 mb-8 flex items-center justify-center gap-4">
+                                <HeartIcon filled /> 
+                                Routine Challenge 
+                                <HeartIcon filled />
+                            </h1>
+                            
+                            <div className="inline-flex items-center gap-8 bg-slate-50 px-10 py-4 rounded-full border shadow-sm">
+                                <div className="text-blue-600 font-extrabold text-xl">
+                                    {routineData.p1.name} <span className="bg-blue-600 text-white px-4 py-1 rounded-full ml-2">{routineData.wins.p1}</span>
+                                </div>
+                                <div className="text-slate-300 font-bold text-2xl italic">vs</div>
+                                <div className="text-pink-600 font-extrabold text-xl">
+                                    <span className="bg-pink-600 text-white px-4 py-1 rounded-full mr-2">{routineData.wins.p2}</span> {routineData.p2.name}
+                                </div>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 relative mb-24">
+                            {/* العمود الأول - أحمد */}
+                            <div className="relative">
+                                {activeReaction && (
+                                    <div className="absolute -top-44 left-1/2 -translate-x-1/2 z-[2000] animate-bounce">
+                                        <img src={activeReaction === 'p1' ? GIF_CONFIG.male_won_p1 : GIF_CONFIG.female_won_p1} className="w-52 h-52 rounded-full border-8 border-white shadow-2xl object-cover" />
+                                    </div>
+                                )}
+                                <PartnerColumn partner="p1" data={routineData.p1} color="blue" onToggle={handleToggle} onAdd={handleAdd} />
+                            </div>
+
+                            {/* العمود الثاني - دعاء */}
+                            <div className="relative">
+                                {activeReaction && (
+                                    <div className="absolute -top-44 left-1/2 -translate-x-1/2 z-[2000] animate-bounce">
+                                        <img src={activeReaction === 'p1' ? GIF_CONFIG.male_won_p2 : GIF_CONFIG.female_won_p2} className="w-52 h-52 rounded-full border-8 border-white shadow-2xl object-cover" />
+                                    </div>
+                                )}
+                                <PartnerColumn partner="p2" data={routineData.p2} color="pink" onToggle={handleToggle} onAdd={handleAdd} />
+                            </div>
+                        </div>
+
+                        <div className="text-center pb-20">
+                            <button onClick={endDay} className="px-16 py-6 bg-slate-900 text-white rounded-full shadow-2xl hover:scale-105 transition-all font-black text-xl hover:bg-black">
+                                End Day & Reset
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function PartnerColumn({ partner, data, color, onToggle, onAdd }) {
+            const [input, setInput] = React.useState("");
+            const isPink = color === 'pink';
+            const accent = isPink ? 'bg-pink-600' : 'bg-blue-600';
+            const text = isPink ? 'text-pink-600' : 'text-blue-600';
+
+            return (
+                <div className="flex flex-col h-full p-8 rounded-[3rem] bg-slate-50 border shadow-inner">
+                    <div className="flex justify-between items-center mb-10">
+                        <h3 className={`text-4xl font-extrabold ${text}`}>{data.name}</h3>
+                        <div className="bg-white px-6 py-3 rounded-3xl shadow-md font-black text-2xl">{data.points}%</div>
+                    </div>
+
+                    <div className="flex flex-col gap-4 mb-10">
+                        <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder="New Task..." className="w-full p-5 rounded-3xl outline-none shadow-sm focus:ring-4 focus:ring-slate-200 text-lg font-medium" onKeyPress={(e) => e.key === 'Enter' && (onAdd(partner, false, input), setInput(""))} />
+                        <div className="flex gap-4">
+                            <button onClick={() => {onAdd(partner, false, input); setInput("");}} className={`flex-1 py-4 rounded-2xl text-white font-bold text-lg shadow-lg hover:brightness-110 active:scale-95 transition ${accent}`}>+ Task</button>
+                            <button onClick={() => {onAdd(partner, true, input); setInput("");}} className="flex-1 py-4 rounded-2xl bg-slate-800 text-white font-bold text-lg shadow-lg hover:bg-black active:scale-95 transition">+ Habit</button>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 space-y-5 custom-scrollbar overflow-y-auto max-h-[550px] pr-2">
+                        {data.tasks.map(t => (
+                            <div key={t.id} className={`flex items-center gap-5 p-6 bg-white rounded-[2rem] shadow-sm transition-all border border-transparent hover:border-slate-100 ${t.completed ? 'opacity-40 grayscale scale-[0.98]' : ''}`}>
+                                <button onClick={() => onToggle(partner, t.id)} className={`transition-all duration-300 transform hover:scale-110 ${t.completed ? 'text-green-500' : 'text-slate-200'}`}>
+                                    <svg width="40" height="40" viewBox="0 0 24 24" fill={t.completed ? "currentColor" : "none"} stroke="currentColor" strokeWidth="3"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4" stroke={t.completed ? "white" : "currentColor"} strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                </button>
+                                <div className="flex-1 text-right" dir="rtl">
+                                    <div className={`text-xl font-bold ${t.completed ? 'line-through text-slate-400' : 'text-slate-700'}`}>{t.text}</div>
+                                    {t.isFixed && <div className="text-[10px] text-slate-300 font-black tracking-tighter uppercase mt-1">Daily Habit</div>}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
